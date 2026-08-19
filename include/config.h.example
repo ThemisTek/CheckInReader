@@ -1,0 +1,6 @@
+#pragma once
+
+#define WIFI_SSID "your-wifi-name"
+#define WIFI_PASSWORD "your-wifi-password"
+#define API_BASE_URL "https://your-api-host"
+#define API_KEY "dsk_live_..."
