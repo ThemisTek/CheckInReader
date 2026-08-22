@@ -42,7 +42,8 @@ void drawNone(int32_t, int32_t) {}
 // Draws `text` centered at (cx, y) using the largest text size in [1, maxSize] that fits
 // within maxWidth (measured via M5.Display.textWidth() at each candidate size). Falls back
 // to size 1 if even that doesn't fit -- a best-effort minimum rather than silently clipping.
-// Returns the size actually used, so the caller can space a following line correctly.
+// Also returns the size actually used: it's left set on M5.Display when this returns, so a
+// caller can space a following line with M5.Display.fontHeight() without a second call.
 int32_t drawFittedString(const String& text, int32_t cx, int32_t y, int32_t maxWidth, int32_t maxSize) {
     int32_t size = maxSize;
     for (; size > 1; --size) {
