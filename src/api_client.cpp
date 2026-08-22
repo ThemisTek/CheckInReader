@@ -3,6 +3,23 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 
+namespace {
+
+ScanOutcome mapOutcome(int ordinal) {
+    switch (ordinal) {
+        case 0: return ScanOutcome::CheckedIn;
+        case 1: return ScanOutcome::AlreadyCheckedIn;
+        case 2: return ScanOutcome::ChooseSession;
+        case 3: return ScanOutcome::NoSession;
+        case 4: return ScanOutcome::UnknownCard;
+        case 5: return ScanOutcome::PairingBound;
+        case 6: return ScanOutcome::PairingAlreadyBound;
+        default: return ScanOutcome::Unknown;
+    }
+}
+
+}  // namespace
+
 ScanResult scanCard(const String& uid) {
     ScanResult result;
 
@@ -37,9 +54,31 @@ ScanResult scanCard(const String& uid) {
         return result;
     }
 
+    result.outcome = mapOutcome(responseDoc["outcome"] | -1);
+
     const char* message = responseDoc["message"] | "Scan failed (no message)";
     const char* scannedCard = responseDoc["scannedCard"] | "";
+    const char* attendanceId = responseDoc["attendanceId"] | "";
     result.message = message;
     result.scannedCard = scannedCard;
+    result.attendanceId = attendanceId;
+
+    if (!responseDoc["student"].isNull()) {
+        const char* firstName = responseDoc["student"]["firstName"] | "";
+        result.studentFirstName = firstName;
+    }
+
     return result;
+}
+
+bool deleteAttendance(const String& attendanceId) {
+    HTTPClient http;
+    http.begin(String(API_BASE_URL) + "/api/companies/" + COMPANY_ID +
+               "/check-in/attendance/" + attendanceId);
+    http.addHeader("X-Api-Key", API_KEY);
+
+    int status = http.sendRequest("DELETE");
+    http.end();
+
+    return status == 204 || status == 404;
 }
