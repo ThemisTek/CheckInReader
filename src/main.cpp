@@ -14,6 +14,7 @@ String lastUid;
 bool showingResult = false;
 bool showingUndone = false;
 unsigned long lastScreenChangeAt = 0;
+unsigned long touchDownAt = 0;
 
 ScanResult currentResult;
 TouchRect undoButton;
@@ -46,11 +47,23 @@ void playOutcomeTone(ScanOutcome outcome) {
 }
 
 bool undoButtonTapped() {
-    if (undoButton.isEmpty() || M5.Touch.getCount() == 0) {
+    if (M5.Touch.getCount() == 0) {
         return false;
     }
     auto detail = M5.Touch.getDetail(0);
-    return detail.wasClicked() && undoButton.contains(detail.x, detail.y);
+    if (detail.wasPressed()) {
+        touchDownAt = millis();
+    }
+    if (undoButton.isEmpty() || !detail.wasClicked()) {
+        return false;
+    }
+    // A tap whose press began before this screen was drawn belongs to whatever was on
+    // screen at the time (e.g. a different scan's Undo button occupying the same spot on
+    // a busy front-desk device) -- ignore it rather than attributing it to this screen.
+    if (touchDownAt < lastScreenChangeAt) {
+        return false;
+    }
+    return undoButton.contains(detail.x, detail.y);
 }
 
 }  // namespace
@@ -84,6 +97,8 @@ void loop() {
         showingUndone = true;
         undoButton = TouchRect{};
         lastScreenChangeAt = millis();
+        delay(200);
+        return;
     }
 
     String uid = tryReadCard();
@@ -95,8 +110,8 @@ void loop() {
         if (uid != lastUid) {
             lastUid = uid;
             currentResult = scanCard(uid);
-            playOutcomeTone(currentResult.outcome);
             undoButton = showResult(currentResult);
+            playOutcomeTone(currentResult.outcome);
             showingResult = true;
             showingUndone = false;
             lastScreenChangeAt = millis();
@@ -111,6 +126,7 @@ void loop() {
     if (showingResult && sinceChange > resultTimeout) {
         showMessage("Ready");
         showingResult = false;
+        undoButton = TouchRect{};
         lastScreenChangeAt = millis();
     } else if (showingUndone && sinceChange > UNDONE_DISPLAY_MS) {
         showMessage("Ready");
