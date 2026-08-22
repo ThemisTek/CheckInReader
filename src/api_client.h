@@ -35,6 +35,6 @@ struct ScanResult {
 // Sends the scanned UID to POST /check-in/scan and returns what to display.
 ScanResult scanCard(const String& uid);
 
-// Deletes an attendance row by id (Undo). Returns true when the row is gone afterward -- a
-// fresh 204 or an already-gone 404 both count, mirroring the API's own delete idempotency.
+// Deletes an attendance row by id (Undo). Returns true on 204 (idempotent: deleted or already gone)
+// or defensively on 404 (company mismatch, should not occur in normal operation).
 bool deleteAttendance(const String& attendanceId);
