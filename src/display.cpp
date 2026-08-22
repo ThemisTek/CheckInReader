@@ -39,6 +39,23 @@ void drawQuestion(int32_t x, int32_t y) {
 
 void drawNone(int32_t, int32_t) {}
 
+// Draws `text` centered at (cx, y) using the largest text size in [1, maxSize] that fits
+// within maxWidth (measured via M5.Display.textWidth() at each candidate size). Falls back
+// to size 1 if even that doesn't fit -- a best-effort minimum rather than silently clipping.
+// Returns the size actually used, so the caller can space a following line correctly.
+int32_t drawFittedString(const String& text, int32_t cx, int32_t y, int32_t maxWidth, int32_t maxSize) {
+    int32_t size = maxSize;
+    for (; size > 1; --size) {
+        M5.Display.setTextSize(size);
+        if (M5.Display.textWidth(text) <= maxWidth) {
+            break;
+        }
+    }
+    M5.Display.setTextSize(size);
+    M5.Display.drawString(text, cx, y);
+    return size;
+}
+
 OutcomeStyle styleFor(ScanOutcome outcome) {
     switch (outcome) {
         case ScanOutcome::CheckedIn:
@@ -59,6 +76,11 @@ OutcomeStyle styleFor(ScanOutcome outcome) {
     }
 }
 
+const int32_t RESULT_BAND_H = 56;
+const int32_t ICON_MARGIN_X = 10;
+const int32_t ICON_MARGIN_Y = 8;
+const int32_t TEXT_TOP_MARGIN = 16;
+const int32_t TEXT_SIDE_MARGIN = 10;
 const int32_t UNDO_BTN_W = 120;
 const int32_t UNDO_BTN_H = 44;
 const int32_t UNDO_BTN_MARGIN = 10;
@@ -89,23 +111,20 @@ TouchRect showResult(const ScanResult& result) {
 
     M5.Display.fillScreen(TFT_BLACK);
 
-    int32_t bandH = 56;
-    M5.Display.fillRect(0, 0, screenW, bandH, style.color);
-    style.drawIcon(10, 8);
+    M5.Display.fillRect(0, 0, screenW, RESULT_BAND_H, style.color);
+    style.drawIcon(ICON_MARGIN_X, ICON_MARGIN_Y);
 
-    int32_t textY = bandH + 16;
+    int32_t textY = RESULT_BAND_H + TEXT_TOP_MARGIN;
+    int32_t maxTextWidth = screenW - 2 * TEXT_SIDE_MARGIN;
     M5.Display.setTextColor(TFT_WHITE);
     M5.Display.setTextDatum(top_center);
 
     if (result.studentFirstName.length() > 0) {
-        M5.Display.setTextSize(4);
-        M5.Display.drawString(result.studentFirstName, screenW / 2, textY);
-        textY += 44;
-        M5.Display.setTextSize(2);
-        M5.Display.drawString(result.message, screenW / 2, textY);
+        drawFittedString(result.studentFirstName, screenW / 2, textY, maxTextWidth, 4);
+        textY += M5.Display.fontHeight() + 6;
+        drawFittedString(result.message, screenW / 2, textY, maxTextWidth, 2);
     } else {
-        M5.Display.setTextSize(2);
-        M5.Display.drawString(result.message, screenW / 2, textY);
+        drawFittedString(result.message, screenW / 2, textY, maxTextWidth, 2);
     }
     M5.Display.setTextDatum(top_left);
 
