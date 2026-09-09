@@ -1,7 +1,18 @@
 #pragma once
 
-#define WIFI_SSID "your-wifi-name"
-#define WIFI_PASSWORD "your-wifi-password"
+// Tried in order at boot, and again (cycling from wherever it left off) if the connection ever
+// drops -- see wifi_setup.h. Add as many as needed: a primary router, a phone hotspot as backup,
+// a secondary AP for a different room, etc.
+struct WifiCredential {
+    const char* ssid;
+    const char* password;
+};
+
+static const WifiCredential WIFI_NETWORKS[] = {
+    {"your-wifi-name", "your-wifi-password"},
+    // {"backup-wifi-name", "backup-wifi-password"},
+};
+
 #define API_BASE_URL "https://your-api-host"
 #define API_KEY "dsk_live_..."
 #define COMPANY_ID "00000000-0000-0000-0000-000000000000"
