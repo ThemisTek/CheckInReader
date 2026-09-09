@@ -11,6 +11,7 @@ const unsigned long UNDONE_DISPLAY_MS = 1500;        // the brief "Undone" confi
 const unsigned long IDLE_REFRESH_MS = 60000;         // keeps the battery reading from going stale
 const unsigned long NFC_POLL_INTERVAL_MS = 150;      // I2C poll cadence for the NFC unit
 const unsigned long LOOP_DELAY_MS = 10;              // just enough to yield to the watchdog/idle task
+const int16_t TOUCH_HIT_PADDING = 20;                // forgiveness beyond the drawn UNDO button
 
 String lastUid;
 bool showingResult = false;
@@ -18,6 +19,7 @@ bool showingUndone = false;
 unsigned long lastScreenChangeAt = 0;
 unsigned long lastNfcPollAt = 0;
 unsigned long touchDownAt = 0;
+bool undoButtonHeldVisually = false;  // whether the button is currently drawn in its pressed style
 
 ScanResult currentResult;
 TouchRect undoButton;
@@ -49,24 +51,60 @@ void playOutcomeTone(ScanOutcome outcome) {
     }
 }
 
+// Must be called every loop tick while a result with an Undo button is showing (not just on
+// release): it also drives the button's pressed/normal visual state and pauses the result
+// screen's auto-dismiss countdown for as long as a finger is down on it (see loop()).
+// Returns true exactly once, on the tick a full press-and-release on the button completes.
 bool undoButtonTapped() {
-    if (M5.Touch.getCount() == 0) {
+    if (undoButton.isEmpty()) {
         return false;
     }
+    if (M5.Touch.getCount() == 0) {
+        if (undoButtonHeldVisually) {
+            drawUndoButton(undoButton, false);
+            undoButtonHeldVisually = false;
+            lastScreenChangeAt = millis();  // give the countdown a fresh window after release
+        }
+        return false;
+    }
+
     auto detail = M5.Touch.getDetail(0);
     if (detail.wasPressed()) {
         touchDownAt = millis();
     }
-    if (undoButton.isEmpty() || !detail.wasClicked()) {
-        return false;
+
+    // A tap whose press began before this screen was drawn belongs to whatever was on screen
+    // at the time (e.g. a different scan's Undo button occupying the same spot on a busy
+    // front-desk device) -- ignore it rather than attributing it to this screen.
+    bool belongsToThisScreen = touchDownAt >= lastScreenChangeAt;
+    // Judge "inside the button" by where the finger FIRST touched down (base_x/base_y, latched
+    // once on contact and never updated afterward) rather than the live position: M5Unified
+    // reclassifies a touch as hold/flick/drag once it drifts past a threshold -- which a light
+    // fingertip does routinely due to centroid noise -- and wasClicked() then never fires
+    // (it's only true for the exact touch_end state). wasReleased() fires for every release
+    // regardless of that reclassification, so it -- combined with the latched contact point --
+    // is what makes any ordinary press-and-release register, not just a fast, dead-still one.
+    bool downInsideButton = belongsToThisScreen &&
+                             undoButton.containsPadded(detail.base_x, detail.base_y, TOUCH_HIT_PADDING);
+
+    if (detail.isPressed() && downInsideButton) {
+        if (!undoButtonHeldVisually) {
+            drawUndoButton(undoButton, true);
+            undoButtonHeldVisually = true;
+        }
+        return false;  // still held; wait for release
     }
-    // A tap whose press began before this screen was drawn belongs to whatever was on
-    // screen at the time (e.g. a different scan's Undo button occupying the same spot on
-    // a busy front-desk device) -- ignore it rather than attributing it to this screen.
-    if (touchDownAt < lastScreenChangeAt) {
-        return false;
+
+    if (undoButtonHeldVisually) {
+        // Finger lifted, or dragged off the button and released elsewhere -- restore the
+        // normal look and give the countdown a fresh window rather than one that may have
+        // already run out while held (see the paused check in loop()).
+        drawUndoButton(undoButton, false);
+        undoButtonHeldVisually = false;
+        lastScreenChangeAt = millis();
     }
-    return undoButton.contains(detail.x, detail.y);
+
+    return detail.wasReleased() && downInsideButton;
 }
 
 }  // namespace
@@ -77,7 +115,13 @@ void setup() {
     Serial.begin(115200);
 
     showMessage("Connecting to WiFi...");
-    connectWifi();
+    // connectWifi() is a single pass over every configured network; retrying the whole pass
+    // here (rather than that being hidden inside connectWifi() itself) is what turns "reached
+    // the end of the list" into "start over from the top" instead of a dead end -- this device
+    // has nothing useful to do without a network, so it's worth waiting for.
+    while (!connectWifi()) {
+        showMessage("WiFi failed, retrying...");
+    }
 
     if (!initNfcReader()) {
         showMessage("NFC unit not found");
@@ -97,13 +141,23 @@ void loop() {
     // ms) and used to sit directly in this loop too, which -- combined with the old flat
     // delay(200) -- made the loop slow enough for ordinary taps to fall entirely between polls.
     M5.update();
+    // Non-blocking: a no-op whenever WiFi is up, so this doesn't affect touch/NFC responsiveness
+    // during normal operation. Recovers a dropped connection (including failing over to a
+    // backup network) without anyone having to power-cycle the device.
+    maintainWifi();
 
     if (showingResult && undoButtonTapped()) {
+        // Acknowledge the tap immediately, before the blocking HTTPS round-trip: without this
+        // the old result screen (button included) just sits there for the ~1s of the delete
+        // request, which reads as the button not having registered at all -- prompting a
+        // second, unnecessary tap.
+        showMessage("Undoing...");
         bool undone = deleteAttendance(currentResult.attendanceId);
         showMessage(undone ? "Undone" : "Undo failed");
         showingResult = false;
         showingUndone = true;
         undoButton = TouchRect{};
+        undoButtonHeldVisually = false;
         lastScreenChangeAt = millis();
         delay(LOOP_DELAY_MS);
         return;
@@ -124,6 +178,7 @@ void loop() {
                 lastUid = uid;
                 currentResult = scanCard(uid);
                 undoButton = showResult(currentResult);
+                undoButtonHeldVisually = false;
                 playOutcomeTone(currentResult.outcome);
                 showingResult = true;
                 showingUndone = false;
@@ -137,10 +192,14 @@ void loop() {
     unsigned long sinceChange = millis() - lastScreenChangeAt;
     unsigned long resultTimeout = undoButton.isEmpty() ? RESULT_DISPLAY_MS : RESULT_WITH_UNDO_MS;
 
-    if (showingResult && sinceChange > resultTimeout) {
+    if (showingResult && undoButtonHeldVisually) {
+        // Don't dismiss out from under a finger that's still on the button -- the countdown
+        // resumes (with a fresh window) once undoButtonTapped() sees it lift, above.
+    } else if (showingResult && sinceChange > resultTimeout) {
         showMessage("Ready");
         showingResult = false;
         undoButton = TouchRect{};
+        undoButtonHeldVisually = false;
         lastScreenChangeAt = millis();
     } else if (showingUndone && sinceChange > UNDONE_DISPLAY_MS) {
         showMessage("Ready");

@@ -158,6 +158,22 @@ const int32_t UNDO_BTN_MARGIN = 10;
 
 }  // namespace
 
+void drawUndoButton(const TouchRect& button, bool pressed) {
+    // Pressed = inverted (white fill/black text) rather than a shade of the same grey, so the
+    // state is unmistakable even on a small, sun-washed, or low-brightness screen.
+    uint16_t fill = pressed ? TFT_WHITE : M5.Display.color565(60, 60, 60);
+    uint16_t text = pressed ? TFT_BLACK : TFT_WHITE;
+
+    M5.Display.fillRoundRect(button.x, button.y, button.w, button.h, 8, fill);
+    M5.Display.drawRoundRect(button.x, button.y, button.w, button.h, 8, TFT_WHITE);
+    M5.Display.setTextDatum(middle_center);
+    M5.Display.setTextSize(2);
+    M5.Display.setTextColor(text);
+    M5.Display.drawString("UNDO", button.x + button.w / 2, button.y + button.h / 2);
+    M5.Display.setTextDatum(top_left);
+    M5.Display.setTextColor(TFT_WHITE);
+}
+
 void showMessage(const String& text) {
     M5.Display.fillScreen(TFT_BLACK);
     M5.Display.setTextColor(TFT_WHITE);
@@ -211,14 +227,7 @@ TouchRect showResult(const ScanResult& result) {
         button.h = UNDO_BTN_H;
         button.x = screenW - UNDO_BTN_W - UNDO_BTN_MARGIN;
         button.y = screenH - UNDO_BTN_H - UNDO_BTN_MARGIN;
-
-        M5.Display.fillRoundRect(button.x, button.y, button.w, button.h, 8,
-                                  M5.Display.color565(60, 60, 60));
-        M5.Display.drawRoundRect(button.x, button.y, button.w, button.h, 8, TFT_WHITE);
-        M5.Display.setTextDatum(middle_center);
-        M5.Display.setTextSize(2);
-        M5.Display.drawString("UNDO", button.x + button.w / 2, button.y + button.h / 2);
-        M5.Display.setTextDatum(top_left);
+        drawUndoButton(button, false);
     }
 
     return button;
