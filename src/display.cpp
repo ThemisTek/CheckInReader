@@ -1,5 +1,6 @@
 #include "display.h"
 #include <M5Unified.h>
+#include <vector>
 
 namespace {
 
@@ -55,6 +56,75 @@ int32_t drawFittedString(const String& text, int32_t cx, int32_t y, int32_t maxW
     M5.Display.setTextSize(size);
     M5.Display.drawString(text, cx, y);
     return size;
+}
+
+std::vector<String> splitWords(const String& text) {
+    std::vector<String> words;
+    int32_t start = 0;
+    int32_t len = text.length();
+    while (start < len) {
+        while (start < len && text[start] == ' ') ++start;
+        int32_t end = start;
+        while (end < len && text[end] != ' ') ++end;
+        if (end > start) {
+            words.push_back(text.substring(start, end));
+        }
+        start = end;
+    }
+    return words;
+}
+
+// Greedily packs `words` into lines no wider than maxWidth at the currently-set text size.
+// A single word that alone exceeds maxWidth is left on its own (overflowing) line rather
+// than hyphenated -- not worth it for names.
+std::vector<String> packLines(const std::vector<String>& words, int32_t maxWidth) {
+    std::vector<String> lines;
+    String current;
+    for (const String& word : words) {
+        String candidate = current.length() == 0 ? word : current + " " + word;
+        if (current.length() > 0 && M5.Display.textWidth(candidate) > maxWidth) {
+            lines.push_back(current);
+            current = word;
+        } else {
+            current = candidate;
+        }
+    }
+    if (current.length() > 0) {
+        lines.push_back(current);
+    }
+    return lines;
+}
+
+// Word-wraps `text` into at most maxLines centered lines, at the largest size in
+// [1, maxSize] whose wrap fits within maxLines -- same shrink-to-fit contract as
+// drawFittedString() above, but spread across lines instead of squeezed onto one, which is
+// what let a long name run off the edge of the screen. Falls back to however many lines it
+// takes at size 1 if even that doesn't fit in maxLines, same "best effort, never clip"
+// reasoning as drawFittedString(). Returns the total height drawn so the caller can
+// position what follows below it.
+int32_t drawWrappedString(const String& text, int32_t cx, int32_t y, int32_t maxWidth,
+                           int32_t maxSize, int32_t maxLines) {
+    std::vector<String> words = splitWords(text);
+    std::vector<String> lines;
+    int32_t size = maxSize;
+    for (; size > 1; --size) {
+        M5.Display.setTextSize(size);
+        lines = packLines(words, maxWidth);
+        if (static_cast<int32_t>(lines.size()) <= maxLines) {
+            break;
+        }
+    }
+    if (size == 1) {
+        M5.Display.setTextSize(1);
+        lines = packLines(words, maxWidth);
+    }
+
+    const int32_t lineSpacing = 4;
+    int32_t lineHeight = M5.Display.fontHeight() + lineSpacing;
+    for (std::size_t i = 0; i < lines.size(); ++i) {
+        M5.Display.drawString(lines[i], cx, y + static_cast<int32_t>(i) * lineHeight);
+    }
+    return lines.empty() ? 0 : static_cast<int32_t>(lines.size()) * lineHeight - lineSpacing;
 }
 
 OutcomeStyle styleFor(ScanOutcome outcome) {
@@ -121,8 +191,11 @@ TouchRect showResult(const ScanResult& result) {
     M5.Display.setTextDatum(top_center);
 
     if (result.studentFirstName.length() > 0) {
-        drawFittedString(result.studentFirstName, screenW / 2, textY, maxTextWidth, 4);
-        textY += M5.Display.fontHeight() + 6;
+        // Wrapped rather than a single shrink-to-fit line: a long name (long first name,
+        // or occasionally more than just a first name) was otherwise running off the edge
+        // of the screen at the smallest allowed size instead of just taking a second line.
+        textY += drawWrappedString(result.studentFirstName, screenW / 2, textY, maxTextWidth, 4, 2);
+        textY += 6;
         drawFittedString(result.message, screenW / 2, textY, maxTextWidth, 2);
     } else {
         drawFittedString(result.message, screenW / 2, textY, maxTextWidth, 2);
