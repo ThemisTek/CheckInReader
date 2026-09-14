@@ -1,8 +1,17 @@
 #include "display.h"
 #include <M5Unified.h>
+#include <U8g2lib.h>
 #include <vector>
 
 namespace {
+
+// M5GFX's default font only covers ASCII, so Greek text (student names, API messages) was
+// rendering as blank glyphs. Unifont is a bitmap font bundled with the U8g2 library; this
+// "_t_greek" build is a 241-glyph subset of it -- ASCII plus the full modern Greek block
+// (U+0370-U+03FF, so accented vowels like a tonos are included) -- at a fixed 16px glyph
+// height. It plugs into M5GFX as an ordinary IFont via the lgfx::U8g2font adapter, so the
+// existing setTextSize()/textWidth()/fontHeight() calls throughout this file are unaffected.
+const lgfx::U8g2font greekFont(u8g2_font_unifont_t_greek);
 
 struct OutcomeStyle {
     uint16_t color;
@@ -74,13 +83,57 @@ std::vector<String> splitWords(const String& text) {
     return words;
 }
 
+// Splits a single `word` into pieces that each fit within maxWidth at the currently-set text
+// size, breaking between characters rather than words -- the fallback for a name with no
+// spaces in it at all (the common case) that's still too wide for one line. Advances by whole
+// UTF-8 code points so a multi-byte Greek character is never split across two pieces.
+std::vector<String> splitWordToFit(const String& word, int32_t maxWidth) {
+    std::vector<String> pieces;
+    String current;
+    uint32_t i = 0;
+    while (i < word.length()) {
+        uint8_t lead = static_cast<uint8_t>(word[i]);
+        uint32_t charLen = 1;
+        if ((lead & 0xE0) == 0xC0) charLen = 2;
+        else if ((lead & 0xF0) == 0xE0) charLen = 3;
+        else if ((lead & 0xF8) == 0xF0) charLen = 4;
+        String ch = word.substring(i, i + charLen);
+        String candidate = current + ch;
+        if (current.length() > 0 && M5.Display.textWidth(candidate) > maxWidth) {
+            pieces.push_back(current);
+            current = ch;
+        } else {
+            current = candidate;
+        }
+        i += charLen;
+    }
+    if (current.length() > 0) {
+        pieces.push_back(current);
+    }
+    return pieces;
+}
+
 // Greedily packs `words` into lines no wider than maxWidth at the currently-set text size.
-// A single word that alone exceeds maxWidth is left on its own (overflowing) line rather
-// than hyphenated -- not worth it for names.
+// A word that alone exceeds maxWidth (a name with no spaces, which is the usual case, at a
+// size too big for it) is hard-wrapped character-by-character via splitWordToFit() rather
+// than left overflowing on its own line: leaving it overflowing defeated the whole point of
+// wrapping (drawWrappedString picks the largest size whose *wrap* fits maxLines, so an
+// always-one-line "wrap" for a single-word name meant that check never caught an oversized
+// line and never shrank the font).
 std::vector<String> packLines(const std::vector<String>& words, int32_t maxWidth) {
     std::vector<String> lines;
     String current;
     for (const String& word : words) {
+        if (M5.Display.textWidth(word) > maxWidth) {
+            if (current.length() > 0) {
+                lines.push_back(current);
+                current = "";
+            }
+            for (const String& piece : splitWordToFit(word, maxWidth)) {
+                lines.push_back(piece);
+            }
+            continue;
+        }
         String candidate = current.length() == 0 ? word : current + " " + word;
         if (current.length() > 0 && M5.Display.textWidth(candidate) > maxWidth) {
             lines.push_back(current);
@@ -98,10 +151,12 @@ std::vector<String> packLines(const std::vector<String>& words, int32_t maxWidth
 // Word-wraps `text` into at most maxLines centered lines, at the largest size in
 // [1, maxSize] whose wrap fits within maxLines -- same shrink-to-fit contract as
 // drawFittedString() above, but spread across lines instead of squeezed onto one, which is
-// what let a long name run off the edge of the screen. Falls back to however many lines it
-// takes at size 1 if even that doesn't fit in maxLines, same "best effort, never clip"
-// reasoning as drawFittedString(). Returns the total height drawn so the caller can
-// position what follows below it.
+// what let a long name run off the edge of the screen. Relies on packLines() actually
+// reporting more lines once a line stops fitting maxWidth (including a hard, mid-word wrap --
+// see packLines()) for this size-shrink loop to have anything to react to. Falls back to
+// however many lines it takes at size 1 if even that doesn't fit in maxLines, same
+// "best effort, never clip" reasoning as drawFittedString(). Returns the total height drawn
+// so the caller can position what follows below it.
 int32_t drawWrappedString(const String& text, int32_t cx, int32_t y, int32_t maxWidth,
                            int32_t maxSize, int32_t maxLines) {
     std::vector<String> words = splitWords(text);
@@ -172,6 +227,10 @@ void drawUndoButton(const TouchRect& button, bool pressed) {
     M5.Display.drawString("UNDO", button.x + button.w / 2, button.y + button.h / 2);
     M5.Display.setTextDatum(top_left);
     M5.Display.setTextColor(TFT_WHITE);
+}
+
+void initDisplayFont() {
+    M5.Display.setFont(&greekFont);
 }
 
 void showMessage(const String& text) {

@@ -25,6 +25,11 @@ struct TouchRect {
     }
 };
 
+// Switches M5.Display to a font that can render Greek glyphs (student names and API
+// messages are frequently Greek), in place of M5GFX's default font, which only covers
+// ASCII. Must be called once, after M5.begin(), before the first showMessage()/showResult().
+void initDisplayFont();
+
 // Clears the screen and draws a plain message. Used for non-result states (connecting,
 // ready, NFC-not-found, and the transient "Undone" confirmation).
 void showMessage(const String& text);
