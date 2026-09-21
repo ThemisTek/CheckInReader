@@ -3,6 +3,10 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 
+#ifndef FIRMWARE_VERSION
+#define FIRMWARE_VERSION "dev"
+#endif
+
 namespace {
 
 ScanOutcome mapOutcome(int ordinal) {
@@ -81,4 +85,84 @@ bool deleteAttendance(const String& attendanceId) {
     http.end();
 
     return status == 204 || status == 404;
+}
+
+DevicePairingStart startDevicePairing(const String& ssid) {
+    DevicePairingStart result;
+
+    JsonDocument requestDoc;
+    requestDoc["firmwareVersion"] = FIRMWARE_VERSION;
+    requestDoc["ssid"] = ssid;
+    String body;
+    serializeJson(requestDoc, body);
+
+    HTTPClient http;
+    http.begin(deviceConfig::apiBaseUrl() + "/api/device-pairing/start");
+    http.addHeader("Content-Type", "application/json");
+    result.httpStatus = http.POST(body);
+    if (result.httpStatus != HTTP_CODE_OK) {
+        http.end();
+        return result;
+    }
+    String payload = http.getString();
+    http.end();
+
+    JsonDocument responseDoc;
+    if (deserializeJson(responseDoc, payload)) {
+        return result;
+    }
+
+    const char* code = responseDoc["code"] | "";
+    const char* pollToken = responseDoc["pollToken"] | "";
+    result.code = code;
+    result.pollToken = pollToken;
+    result.expiresInSeconds = responseDoc["expiresInSeconds"] | 0;
+    result.ok = result.code.length() > 0 && result.pollToken.length() > 0 && result.expiresInSeconds > 0;
+    return result;
+}
+
+DevicePairingPoll pollDevicePairing(const String& pollToken) {
+    DevicePairingPoll result;
+
+    HTTPClient http;
+    http.begin(deviceConfig::apiBaseUrl() + "/api/device-pairing/" + pollToken);
+    int status = http.GET();
+    if (status != HTTP_CODE_OK) {
+        http.end();
+        return result;  // Error: a network blip, not an answer
+    }
+    String payload = http.getString();
+    http.end();
+
+    JsonDocument responseDoc;
+    if (deserializeJson(responseDoc, payload)) {
+        return result;
+    }
+
+    switch (responseDoc["status"] | -1) {
+        case 0:
+            result.state = DevicePairingState::Pending;
+            break;
+        case 2:
+            result.state = DevicePairingState::Expired;
+            break;
+        case 1: {
+            const char* companyId = responseDoc["companyId"] | "";
+            const char* companyName = responseDoc["companyName"] | "";
+            const char* deviceName = responseDoc["deviceName"] | "";
+            const char* apiKey = responseDoc["apiKey"] | "";
+            result.companyId = companyId;
+            result.companyName = companyName;
+            result.deviceName = deviceName;
+            result.apiKey = apiKey;
+            // The server has already forgotten the key, so a Claimed reply without one cannot be retried.
+            result.state = (result.apiKey.length() > 0 && result.companyId.length() > 0)
+                               ? DevicePairingState::Claimed
+                               : DevicePairingState::Error;
+            break;
+        }
+        default:
+            break;  // stays Error
+    }
+    return result;
 }
