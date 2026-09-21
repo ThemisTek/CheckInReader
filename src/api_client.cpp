@@ -1,5 +1,5 @@
 #include "api_client.h"
-#include "config.h"
+#include "device_config.h"
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 
@@ -24,9 +24,9 @@ ScanResult scanCard(const String& uid) {
     ScanResult result;
 
     HTTPClient http;
-    http.begin(String(API_BASE_URL) + "/api/companies/" + COMPANY_ID + "/check-in/scan");
+    http.begin(deviceConfig::apiBaseUrl() + "/api/companies/" + deviceConfig::companyId() + "/check-in/scan");
     http.addHeader("Content-Type", "application/json");
-    http.addHeader("X-Api-Key", API_KEY);
+    http.addHeader("X-Api-Key", deviceConfig::apiKey());
 
     JsonDocument requestDoc;
     requestDoc["card"] = uid;
@@ -73,9 +73,9 @@ ScanResult scanCard(const String& uid) {
 
 bool deleteAttendance(const String& attendanceId) {
     HTTPClient http;
-    http.begin(String(API_BASE_URL) + "/api/companies/" + COMPANY_ID +
+    http.begin(deviceConfig::apiBaseUrl() + "/api/companies/" + deviceConfig::companyId() +
                "/check-in/attendance/" + attendanceId);
-    http.addHeader("X-Api-Key", API_KEY);
+    http.addHeader("X-Api-Key", deviceConfig::apiKey());
 
     int status = http.sendRequest("DELETE");
     http.end();
