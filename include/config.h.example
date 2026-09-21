@@ -1,8 +1,14 @@
 #pragma once
 
-// Tried in order at boot, and again (cycling from wherever it left off) if the connection ever
-// drops -- see wifi_setup.h. Add as many as needed: a primary router, a phone hotspot as backup,
-// a secondary AP for a different room, etc.
+// A reader is set up from a phone and the web app, so the only value a build strictly needs is the
+// API address. On first boot the reader opens its own WiFi hotspot for the school network, then shows
+// a code to enter under Settings > API keys > Add reader in the web app. Its WiFi, API key and company
+// are then kept in the device's flash and can be changed later by holding the idle screen for 5 seconds.
+#define API_BASE_URL "https://your-api-host"
+
+// ---- Optional fallback (older readers, or bench work) --------------------------------------------
+// Used only while nothing has been saved on the device; anything saved by the setup flow wins. Leaving
+// the placeholders below as they are means "not configured" -- they are ignored, not tried.
 struct WifiCredential {
     const char* ssid;
     const char* password;
@@ -13,6 +19,5 @@ static const WifiCredential WIFI_NETWORKS[] = {
     // {"backup-wifi-name", "backup-wifi-password"},
 };
 
-#define API_BASE_URL "https://your-api-host"
 #define API_KEY "dsk_live_..."
 #define COMPANY_ID "00000000-0000-0000-0000-000000000000"
