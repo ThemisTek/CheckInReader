@@ -3,6 +3,11 @@
 #include "nfc_reader.h"
 #include "api_client.h"
 #include "display.h"
+#include "device_config.h"
+#include "device_pairing.h"
+#include "setup_menu.h"
+#include "setup_portal.h"
+#include "setup_screens.h"
 
 namespace
 {
@@ -24,6 +29,7 @@ namespace
 
     ScanResult currentResult;
     TouchRect undoButton;
+    bool setupRequestedDuringBoot = false;
 
     void playOutcomeTone(ScanOutcome outcome)
     {
@@ -119,6 +125,74 @@ namespace
         return detail.wasReleased() && downInsideButton;
     }
 
+    // connectWifi() polls this while it waits, so a long-press reaches the setup menu even when the
+    // saved network has gone away and the boot loop would otherwise retry forever.
+    bool abortWifiForSetup()
+    {
+        M5.update();
+        if (setupLongPressDetected())
+        {
+            setupRequestedDuringBoot = true;
+            return true;
+        }
+        return false;
+    }
+
+    // The long-press menu. Returns when setup finishes or is cancelled; the caller redraws its own screen.
+    void handleSetupRequest()
+    {
+        switch (runSetupMenu())
+        {
+        case SetupMenuChoice::ChangeWifi:
+            runWifiSetupPortal(true);
+            showMessage("Connecting to WiFi...");
+            connectWifi(); // one pass; maintainWifi() keeps trying afterwards if it fails
+            break;
+        case SetupMenuChoice::RePair:
+            runDevicePairing(true);
+            break;
+        case SetupMenuChoice::None:
+            break;
+        }
+        waitForTouchRelease(); // the finger that pressed the last button must not linger into loop()
+    }
+
+    // First run and recovery. A reader with no WiFi opens its setup hotspot; one with WiFi but no
+    // API key is waiting to be linked to a school and shows a pairing code. A reader flashed with a
+    // complete config.h has both, so this reduces to the connect loop it always had.
+    void ensureConfigured()
+    {
+        while (!deviceConfig::hasWifi())
+        {
+            runWifiSetupPortal(false);
+        }
+
+        showMessage("Connecting to WiFi...");
+        // connectWifi() is a single pass over every saved network; retrying the whole pass here
+        // (rather than that being hidden inside connectWifi() itself) is what turns "reached the end
+        // of the list" into "start over from the top" instead of a dead end -- this device has
+        // nothing useful to do without a network, so it's worth waiting for. The abort callback is
+        // the way back to the setup menu when the network is not coming back.
+        while (!connectWifi(abortWifiForSetup))
+        {
+            if (setupRequestedDuringBoot)
+            {
+                setupRequestedDuringBoot = false;
+                handleSetupRequest();
+                showMessage("Connecting to WiFi...");
+            }
+            else
+            {
+                showMessage("WiFi failed, retrying...");
+            }
+        }
+
+        if (!deviceConfig::hasApiCredentials())
+        {
+            runDevicePairing(false);
+        }
+    }
+
 } // namespace
 
 void setup()
@@ -128,15 +202,7 @@ void setup()
     Serial.begin(115200);
     initDisplayFont();
 
-    showMessage("Connecting to WiFi...");
-    // connectWifi() is a single pass over every configured network; retrying the whole pass
-    // here (rather than that being hidden inside connectWifi() itself) is what turns "reached
-    // the end of the list" into "start over from the top" instead of a dead end -- this device
-    // has nothing useful to do without a network, so it's worth waiting for.
-    while (!connectWifi())
-    {
-        showMessage("WiFi failed, retrying...");
-    }
+    ensureConfigured();
 
     if (!initNfcReader())
     {
@@ -178,6 +244,17 @@ void loop()
         undoButtonHeldVisually = false;
         lastScreenChangeAt = millis();
         delay(LOOP_DELAY_MS);
+        return;
+    }
+
+    // Setup is deliberate: hold the idle screen for SETUP_HOLD_MS. Only while idle, so it can never
+    // collide with the Undo button or a result on screen.
+    if (!showingResult && !showingUndone && setupLongPressDetected())
+    {
+        handleSetupRequest();
+        showMessage("Ready");
+        lastScreenChangeAt = millis();
+        lastUid = ""; // a card resting on the reader is not a fresh tap
         return;
     }
 

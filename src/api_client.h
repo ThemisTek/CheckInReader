@@ -38,3 +38,32 @@ ScanResult scanCard(const String& uid);
 // Deletes an attendance row by id (Undo). Returns true on 204 (idempotent: deleted or already gone)
 // or defensively on 404 (company mismatch, should not occur in normal operation).
 bool deleteAttendance(const String& attendanceId);
+
+// ---- device pairing (API ADR-036) ----------------------------------------------------------
+// Both calls are anonymous: a reader being paired has no key yet.
+
+struct DevicePairingStart {
+    bool ok = false;
+    int httpStatus = 0;  // 429 = too many codes are open from this network; <= 0 = could not connect
+    String code;
+    String pollToken;
+    int expiresInSeconds = 0;
+};
+
+// Asks the API for a pairing code. `ssid` is only a hint the manager sees to recognise this reader.
+DevicePairingStart startDevicePairing(const String& ssid);
+
+// Mirrors Contracts/DevicePairing DevicePairingStatus, which travels as its ordinal
+// (0 Pending, 1 Claimed, 2 Expired). Error = the poll itself failed; try again.
+enum class DevicePairingState { Pending, Claimed, Expired, Error };
+
+struct DevicePairingPoll {
+    DevicePairingState state = DevicePairingState::Error;
+    // Set only when state == Claimed. The API delivers this exactly once.
+    String companyId;
+    String companyName;
+    String deviceName;
+    String apiKey;
+};
+
+DevicePairingPoll pollDevicePairing(const String& pollToken);
